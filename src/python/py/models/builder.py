@@ -47,6 +47,12 @@ class Model:
         self.hf_token = parse_hf_token(extra_options.get("hf_token", "true"))
         self.extra_options = extra_options
 
+        self.batch_size = int(extra_options["batch_size"]) if "batch_size" in extra_options else "batch_size"
+        self.sequence_length = int(extra_options["sequence_length"]) if "sequence_length" in extra_options else "sequence_length"
+        self.max_sequence_length = int(extra_options["max_sequence_length"]) if "max_sequence_length" in extra_options else "max_sequence_length"
+        self.total_sequence_length = int(extra_options["total_sequence_length"]) if "total_sequence_length" in extra_options else "total_sequence_length"
+        self.past_sequence_length = int(extra_options["past_sequence_length"]) if "past_sequence_length" in extra_options else "past_sequence_length"
+
         self.inputs = []
         self.outputs = []
         self.initializers = []
@@ -80,12 +86,12 @@ class Model:
             "past_key_values.value": self.io_dtype,                                                              # For standard models (note that `past_key_values.value` is written this way to match Hugging Face format)
         }
         self.input_shapes = {
-            "input_ids": ["batch_size", "sequence_length"],                                                      # For standard models
-            "attention_mask": ["batch_size", "total_sequence_length"],                                           # For standard models
-            "position_ids": ["batch_size", "sequence_length"],                                                   # For standard models
-            "inputs_embeds": ["batch_size", "sequence_length", self.hidden_size],                                # For standard models where you want to remove the embedding layer from the model (note that `inputs_embeds` is written this way to match Hugging Face format)
-            "past_key_values.key": ["batch_size", self.num_kv_heads, "past_sequence_length", self.head_size],    # For standard models (note that `past_key_values.key` is written this way to match Hugging Face format)
-            "past_key_values.value": ["batch_size", self.num_kv_heads, "past_sequence_length", self.head_size],  # For standard models (note that `past_key_values.value` is written this way to match Hugging Face format)
+            "input_ids": [self.batch_size, self.sequence_length],                                                      # For standard models
+            "attention_mask": [self.batch_size, self.total_sequence_length],                                              # For standard models
+            "position_ids": [self.batch_size, self.sequence_length],                                                   # For standard models
+            "inputs_embeds": [self.batch_size, self.sequence_length, self.hidden_size],                                # For standard models where you want to remove the embedding layer from the model (note that `inputs_embeds` is written this way to match Hugging Face format)
+            "past_key_values.key": [self.batch_size, self.num_kv_heads, self.past_sequence_length, self.head_size],    # For standard models (note that `past_key_values.key` is written this way to match Hugging Face format)
+            "past_key_values.value": [self.batch_size, self.num_kv_heads, self.past_sequence_length, self.head_size],  # For standard models (note that `past_key_values.value` is written this way to match Hugging Face format)
         }
         self.exclude_embeds = "exclude_embeds" in extra_options
         if self.exclude_embeds:
@@ -100,10 +106,10 @@ class Model:
             "present.value": self.io_dtype,                                                                      # For standard models (note that `present.value` is written this way to match Hugging Face format)
         }
         self.output_shapes = {
-            "hidden_states": ["batch_size", "sequence_length", self.hidden_size],                                # For standard models where you want to remove the language modeling head from the model (note that `hidden_states` is written this way to match Hugging Face format)
-            "logits": ["batch_size", "sequence_length", self.vocab_size],                                        # For standard models
-            "present.key": ["batch_size", self.num_kv_heads, "total_sequence_length", self.head_size],           # For standard models (note that `present.key` is written this way to match Hugging Face format)
-            "present.value": ["batch_size", self.num_kv_heads, "total_sequence_length", self.head_size],         # For standard models (note that `present.value` is written this way to match Hugging Face format)
+            "hidden_states": [self.batch_size, self.sequence_length, self.hidden_size],                                # For standard models where you want to remove the language modeling head from the model (note that `hidden_states` is written this way to match Hugging Face format)
+            "logits": [self.batch_size, self.sequence_length, self.vocab_size],                                        # For standard models
+            "present.key": [self.batch_size, self.num_kv_heads, self.total_sequence_length, self.head_size],           # For standard models (note that `present.key` is written this way to match Hugging Face format)
+            "present.value": [self.batch_size, self.num_kv_heads, self.total_sequence_length, self.head_size],         # For standard models (note that `present.value` is written this way to match Hugging Face format)
         }
         self.exclude_lm_head = "exclude_lm_head" in extra_options
         if self.exclude_lm_head:
@@ -702,7 +708,7 @@ class Model:
         last_dim = matmul.weight.shape[0]
         output = "logits" if kwargs.get("logits", False) else f"{name}/output_0"
         self.make_node("MatMul", inputs=[root_input, weight], outputs=[output], name=name)
-        self.make_value_info(output, self.io_dtype, shape=['batch_size', 'sequence_length', last_dim])
+        self.make_value_info(output, self.io_dtype, shape=[self.batch_size, self.sequence_length, last_dim])
 
         return name
 
@@ -739,7 +745,7 @@ class Model:
             accuracy_level=self.quant_attrs["int4"]["accuracy_level"],
             bits=matmul.bits, block_size=matmul.group_size, K=matmul.in_features, N=matmul.out_features,
         )
-        self.make_value_info(output, self.io_dtype, shape=['batch_size', 'sequence_length', matmul.out_features])
+        self.make_value_info(output, self.io_dtype, shape=[self.batch_size, self.sequence_length, matmul.out_features])
 
         return name
 
@@ -790,7 +796,7 @@ class Model:
 
         matmul_output = "logits" if kwargs.get("logits", False) else f"{matmul_name}/output_0"
         self.make_node("MatMul", inputs=[root_input, f"{transpose_name}/output_0"], outputs=[matmul_output], name=matmul_name)
-        self.make_value_info(matmul_output, self.io_dtype, shape=['batch_size', 'sequence_length', matmul.out_features])
+        self.make_value_info(matmul_output, self.io_dtype, shape=[self.batch_size, self.sequence_length, matmul.out_features])
 
         return matmul_name
 
@@ -828,7 +834,7 @@ class Model:
         # Make LoRA Add node
         add_name = "/".join(basename_parts[:-1] + ["lora", "Add"])
         add_inputs = [f"{matmul_name}/output_0", lora_B]
-        add_shape = ["batch_size", "sequence_length", last_dim]
+        add_shape = [self.batch_size, self.sequence_length, last_dim]
         self.make_add(add_name, add_inputs, dtype=self.io_dtype, shape=add_shape)
 
         return add_name
@@ -905,7 +911,7 @@ class Model:
             accuracy_level=self.quant_attrs["int4"]["accuracy_level"],
             bits=matmul.bits, block_size=matmul.group_size, K=matmul.in_features, N=matmul.out_features,
         )
-        self.make_value_info(output, self.io_dtype, shape=['batch_size', 'sequence_length', matmul.out_features])
+        self.make_value_info(output, self.io_dtype, shape=[self.batch_size, self.sequence_length, matmul.out_features])
 
         return name
 
@@ -914,7 +920,7 @@ class Model:
         self.make_external_tensor(add.astype(self.to_numpy_dtype[self.io_dtype]), bias)
 
         add_bias_inputs = [root_input, bias]
-        shape = ['batch_size', 'sequence_length', add.shape[0]]
+        shape = [self.batch_size, self.sequence_length, add.shape[0]]
 
         if "logits" in kwargs:
             output = "logits"
@@ -936,7 +942,7 @@ class Model:
         gather_name = f"{basename}/Gather"
         gather_output = f"{gather_name}/output_0"
         self.make_node('Gather', inputs=[weight, 'input_ids'], outputs=[gather_output], name=gather_name)
-        self.make_value_info(gather_output, self.io_dtype, shape=['batch_size', 'sequence_length', self.hidden_size])
+        self.make_value_info(gather_output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.hidden_size])
 
         if self.embed_attrs["scale"] != 1:
             # Scale the embeddings
@@ -944,7 +950,7 @@ class Model:
             mul_inputs = [gather_output, f"/model/constants/{self.to_str_dtype[self.io_dtype]}/0D/{self.embed_attrs['scale']}"]
             mul_output = f"{mul_name}/output_0"
             self.make_node('Mul', inputs=mul_inputs, outputs=[mul_output], name=mul_name)
-            self.make_value_info(mul_output, self.io_dtype, shape=['batch_size', 'sequence_length', self.hidden_size])
+            self.make_value_info(mul_output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.hidden_size])
 
             layernorm_attrs_value = mul_output
         else:
@@ -960,9 +966,6 @@ class Model:
         weight = f"model.layers.{layer_id}.{location}_layernorm.weight"
         self.make_external_tensor(layernorm.weight.detach().numpy().astype(self.to_numpy_dtype[self.io_dtype]) + self.layernorm_attrs["add_offset"], weight)
         bias = f"model.layers.{layer_id}.{location}_layernorm.bias"
-        if not simple:
-            self.make_external_tensor(layernorm.bias.detach().numpy().astype(self.to_numpy_dtype[self.io_dtype]), bias)
-
         inputs = [root_input, skip_input, weight] if skip else [root_input, weight]
         if not simple:
             inputs.append(bias)
@@ -980,9 +983,9 @@ class Model:
         outputs = [output_0, "", "", output_3] if skip and not self.layernorm_attrs["last_layernorm"] else [output_0]
 
         self.make_node(op_type, inputs=inputs, outputs=outputs, name=name, domain=("com.microsoft" if skip else None), **kwargs)
-        self.make_value_info(output_0, self.io_dtype, shape=['batch_size', 'sequence_length', self.hidden_size])
+        self.make_value_info(output_0, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.hidden_size])
         if skip and not self.layernorm_attrs["last_layernorm"]:
-            self.make_value_info(output_3, self.io_dtype, shape=['batch_size', 'sequence_length', self.hidden_size])
+            self.make_value_info(output_3, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.hidden_size])
 
         # Update LayerNorm attributes
         self.layernorm_attrs["output_0"] = output_0
@@ -1083,7 +1086,7 @@ class Model:
         inputs = [root_input, kwargs.pop("position_ids"), cos_cache_name, sin_cache_name]
         output = f"{name}/output_0"
         self.make_node("RotaryEmbedding", inputs=inputs, outputs=[output], name=name, domain="com.microsoft", interleaved=self.rotemb_attrs["interleaved"], **kwargs)
-        self.make_value_info(output, self.io_dtype, shape=['batch_size', 'sequence_length', self.head_size * (self.num_kv_heads if "k_rotary" in name else self.num_attn_heads)])
+        self.make_value_info(output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.head_size * (self.num_kv_heads if "k_rotary" in name else self.num_attn_heads)])
 
     def make_rotary_embedding_multi_cache(self):
         # Create dummy rotary embedding class
@@ -1098,8 +1101,8 @@ class Model:
         # DML doesn't support dynamic selection of the cos/sin cache, so we always use the biggest one
         if self.ep == "dml":
             self.make_rotary_embedding_caches(rotemb)
-            self.make_value_info(if_cos_cache_output, self.io_dtype, shape=["max_sequence_length", "head_dim / 2"])
-            self.make_value_info(if_sin_cache_output, self.io_dtype, shape=["max_sequence_length", "head_dim / 2"])
+            self.make_value_info(if_cos_cache_output, self.io_dtype, shape=[self.max_sequence_length, self.head_size // 2])
+            self.make_value_info(if_sin_cache_output, self.io_dtype, shape=[self.max_sequence_length, self.head_size // 2])
             return
 
         cos_cache_large_name, sin_cache_large_name = "cos_cache_large", "sin_cache_large"
@@ -1162,8 +1165,8 @@ class Model:
                 ],
             ),
         )
-        self.make_value_info(if_cos_cache_output, self.io_dtype, shape=["max_sequence_length", "head_dim / 2"])
-        self.make_value_info(if_sin_cache_output, self.io_dtype, shape=["max_sequence_length", "head_dim / 2"])
+        self.make_value_info(if_cos_cache_output, self.io_dtype, shape=[self.max_sequence_length, "head_dim / 2"])
+        self.make_value_info(if_sin_cache_output, self.io_dtype, shape=[self.max_sequence_length, "head_dim / 2"])
 
     def make_repeat_kv(self, layer_id, root_input, past_kv, present_kv, **kwargs):
         # Make subgraph that repeats tensor of shape (batch_size, sequence_length, num_kv_heads, head_size)
@@ -1249,10 +1252,10 @@ class Model:
         #                                        present_kv     +------> Gather --> Unsqueeze -----+
         reshape_1_name = f"{basename}/Reshape_1"
         reshape_1_inputs = [root_input, f"/model/constants/TensorProto.INT64/1D/0, 0, {self.num_kv_heads}, -1"]
-        self.make_reshape(reshape_1_name, reshape_1_inputs, dtype=self.io_dtype, shape=['batch_size', 'sequence_length', self.num_kv_heads, self.head_size])
+        self.make_reshape(reshape_1_name, reshape_1_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.num_kv_heads, self.head_size])
         transpose_1_name = f"{basename}/Transpose_1"
         transpose_1_input = f"{reshape_1_name}/output_0"
-        self.make_transpose(transpose_1_name, transpose_1_input, dtype=self.io_dtype, shape=['batch_size', self.num_kv_heads, 'sequence_length', self.head_size], perm=[0,2,1,3])
+        self.make_transpose(transpose_1_name, transpose_1_input, dtype=self.io_dtype, shape=[self.batch_size, self.num_kv_heads, self.sequence_length, self.head_size], perm=[0,2,1,3])
         concat_1_name = f"{basename}/Concat_1"
         concat_1_inputs = [past_kv, f"{transpose_1_name}/output_0"]
         self.make_node("Concat", inputs=concat_1_inputs, outputs=[present_kv], name=concat_1_name, axis=2)
@@ -1326,19 +1329,19 @@ class Model:
         # Unsqueeze --> Expand --> Reshape --> Transpose --> Reshape
         unsqueeze_5_name = f"{basename}/Unsqueeze_5"
         unsqueeze_5_inputs = [present_kv, "/model/constants/TensorProto.INT64/1D/2"]
-        self.make_unsqueeze(unsqueeze_5_name, unsqueeze_5_inputs, dtype=self.io_dtype, shape=['batch_size', self.num_kv_heads, 1, 'sequence_length', self.head_size])
+        self.make_unsqueeze(unsqueeze_5_name, unsqueeze_5_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.num_kv_heads, 1, self.sequence_length, self.head_size])
         expand_name = f"{basename}/Expand"
         expand_inputs = [f"{unsqueeze_5_name}/output_0", f"{where_name}/output_0"]
-        self.make_expand(expand_name, expand_inputs, dtype=self.io_dtype, shape=['batch_size', self.num_kv_heads, self.num_attn_heads // self.num_kv_heads, 'sequence_length', self.head_size])
+        self.make_expand(expand_name, expand_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.num_kv_heads, self.num_attn_heads // self.num_kv_heads, self.sequence_length, self.head_size])
         reshape_3_name = f"{basename}/Reshape_3"
         reshape_3_inputs = [f"{expand_name}/output_0", f"{concat_3_name}/output_0"]
-        self.make_reshape(reshape_3_name, reshape_3_inputs, dtype=self.io_dtype, shape=['batch_size', self.num_attn_heads, 'sequence_length', self.head_size])
+        self.make_reshape(reshape_3_name, reshape_3_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.num_attn_heads, self.sequence_length, self.head_size])
         transpose_2_name = f"{basename}/Transpose_2"
         transpose_2_input = f"{reshape_3_name}/output_0"
-        self.make_transpose(transpose_2_name, transpose_2_input, dtype=self.io_dtype, shape=['batch_size', 'sequence_length', self.num_attn_heads, self.head_size], perm=[0,2,1,3])
+        self.make_transpose(transpose_2_name, transpose_2_input, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.num_attn_heads, self.head_size], perm=[0,2,1,3])
         reshape_4_name = f"{basename}/Reshape_4"
         reshape_4_inputs = [f"{transpose_2_name}/output_0", f"/model/constants/TensorProto.INT64/1D/0, 0, {self.num_attn_heads * self.head_size}"]
-        self.make_reshape(reshape_4_name, reshape_4_inputs, dtype=self.io_dtype, shape=['batch_size', 'sequence_length', self.num_attn_heads * self.head_size])
+        self.make_reshape(reshape_4_name, reshape_4_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.num_attn_heads * self.head_size])
 
         input_to_attention = f"{reshape_4_name}/output_0"
         return input_to_attention
@@ -1367,7 +1370,7 @@ class Model:
             "MultiHeadAttention", inputs=inputs, outputs=outputs, name=name, domain="com.microsoft",
             num_heads=self.num_attn_heads, scale=self.attention_attrs["scale"],
         )
-        self.make_value_info(output, self.io_dtype, shape=['batch_size', 'sequence_length', self.head_size * self.num_attn_heads])
+        self.make_value_info(output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.head_size * self.num_attn_heads])
 
     def make_group_query_attention(self, name, **kwargs):
         inputs = [
@@ -1383,7 +1386,7 @@ class Model:
             num_heads=self.num_attn_heads, kv_num_heads=self.num_kv_heads, scale=self.attention_attrs["scale"], # local_window_size=self.window_size,  # Disable sliding window attribute temporarily
             do_rotary=self.attention_attrs["use_rotemb_in_attn"], rotary_interleaved=self.rotemb_attrs["interleaved"],
         )
-        self.make_value_info(output, self.io_dtype, shape=['batch_size', 'sequence_length', self.head_size * self.num_attn_heads])
+        self.make_value_info(output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.head_size * self.num_attn_heads])
 
     def make_sparse_attention(self, name, **kwargs):
         inputs = [
@@ -1690,7 +1693,7 @@ class Model:
         # Make Mul node after activation
         mul_name = f"/model/layers.{layer_id}/mlp/Mul"
         mul_inputs = [f"{act_fn_name}/output_0", f"{up_name}/output_0"]
-        self.make_mul(mul_name, mul_inputs, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_mul(mul_name, mul_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
 
         # Make output MatMul node
         down_proj = getattr(mlp, "down_proj", None) or getattr(mlp, "dense_4h_to_h", None)
@@ -1851,7 +1854,7 @@ class Model:
                        k=top_k, activation_type=activation_type, normalize_routing_weights=normalize_routing_weights,
                        use_sparse_mixer=use_sparse_mixer, expert_weight_bits=(4 if use_int4 else 8))
 
-        self.make_value_info(output, self.io_dtype, shape=['batch_size', 'sequence_length', self.hidden_size])
+        self.make_value_info(output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.hidden_size])
 
         # Assign output 0 of previous MoE as root input to next SkipLayerNorm
         self.layernorm_attrs["skip_input"] = output
@@ -1867,11 +1870,11 @@ class Model:
         act_name = f"/model/layers.{layer_id}/mlp/act_fn/{activation}"
         act_output = f"{act_name}/output_0"
         self.make_node(activation, inputs=[root_input], outputs=[act_output], name=act_name, domain=domain)
-        self.make_value_info(act_output, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_value_info(act_output, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
 
         mul_act_name = f"/model/layers.{layer_id}/mlp/act_fn/Mul"
         mul_act_inputs = [root_input, act_output]
-        self.make_mul(mul_act_name, mul_act_inputs, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_mul(mul_act_name, mul_act_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
 
         return mul_act_name
 
@@ -1884,7 +1887,7 @@ class Model:
         gelu_name = f"/model/layers.{layer_id}/mlp/act_fn/{activation}"
         output = f"{gelu_name}/output_0"
         self.make_node(activation, inputs=[root_input], outputs=[output], name=gelu_name, domain="com.microsoft")
-        self.make_value_info(output, self.io_dtype, shape=['batch_size', 'sequence_length', self.intermediate_size])
+        self.make_value_info(output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
 
         return gelu_name
 
@@ -1892,7 +1895,7 @@ class Model:
         relu_name = f"/model/layers.{layer_id}/mlp/act_fn/{activation}"
         output = f"{relu_name}/output_0"
         self.make_node(activation, inputs=[root_input], outputs=[output], name=relu_name, domain="")
-        self.make_value_info(output, self.io_dtype, shape=['batch_size', 'sequence_length', self.intermediate_size])
+        self.make_value_info(output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         return relu_name
 
     def make_relu_squared(self, layer_id, root_input, activation):
@@ -1901,7 +1904,7 @@ class Model:
         pow_name = f"{basename}/pow"
         pow_inputs = [f"{relu_name}/output_0", "/model/constants/TensorProto.INT32/1D/2"]
         self.make_node("Pow", inputs=pow_inputs, outputs=[f"{pow_name}/output_0"], name=pow_name, domain="")
-        self.make_value_info(f"{pow_name}/output_0", self.io_dtype, shape=['batch_size', 'sequence_length', self.intermediate_size])
+        self.make_value_info(f"{pow_name}/output_0", self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         return pow_name
 
     def make_activation(self, layer_id, root_input):
@@ -1939,7 +1942,7 @@ class Model:
             mul_inputs = [f"{matmul_name if not bias_exists else add_name}/output_0", f"/model/constants/{self.to_str_dtype[self.io_dtype]}/0D/{self.lm_head_attrs['scale']}"]
             mul_output = "logits" if not mask_exists else f"{mul_name}/output_0"
             self.make_node('Mul', inputs=mul_inputs, outputs=[mul_output], name=mul_name)
-            self.make_value_info(mul_output, self.io_dtype, shape=['batch_size', 'sequence_length', self.vocab_size])
+            self.make_value_info(mul_output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.vocab_size])
 
         if mask_exists:
             # Save logits mask as initializer
@@ -1950,7 +1953,7 @@ class Model:
             where_inputs = [logits_mask_name, f"/model/constants/{self.to_str_dtype[self.io_dtype]}/0D/{np.finfo(self.to_numpy_dtype[self.io_dtype]).min}", f"{mul_name}/output_0"]
             where_output = "logits"
             self.make_node('Where', inputs=where_inputs, outputs=[where_output], name=where_name)
-            self.make_value_info(where_output, self.io_dtype, shape=['batch_size', 'sequence_length', self.vocab_size])
+            self.make_value_info(where_output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.vocab_size])
 
     def make_layer(self, layer_id, layer):
         # Each LLM decoder layer is typically defined as:
@@ -2155,12 +2158,12 @@ class Model:
 
         end_add_name = f"{basename}/Add"
         end_add_inputs = [f"{end_where_name}/output_0", f"{end_expand_name}/output_0"]
-        end_add_shape = ["batch_size", 1, "source_sequence_length", "target_sequence_length"]
+        end_add_shape = [self.batch_size, 1, "source_sequence_length", "target_sequence_length"]
         self.make_add(end_add_name, end_add_inputs, dtype=self.io_dtype, shape=end_add_shape) # Shape of mask is now (B, 1, S, T)
 
         tile_name = f"{basename}/Tile"
         tile_inputs = [f"{end_add_name}/output_0", f"/model/constants/TensorProto.INT64/1D/1, {self.num_attn_heads}, 1, 1"]
-        tile_shape = ["batch_size", self.num_attn_heads, "source_sequence_length", "target_sequence_length"]
+        tile_shape = [self.batch_size, self.num_attn_heads, "source_sequence_length", "target_sequence_length"]
         self.make_tile(tile_name, tile_inputs, dtype=self.io_dtype, shape=tile_shape) # Shape of mask is now (B, N, S, T)
 
         self.mask_attrs["mask_name"] = tile_name
@@ -2272,11 +2275,11 @@ class Model:
 
         unsqueeze_3_name = f"{basename}/Unsqueeze_3"
         unsqueeze_3_inputs = ["attention_mask", "/model/constants/TensorProto.INT64/1D/1"]
-        attention_mask_shape.insert(1, 1) # ['batch_size', 'total_sequence_length'] --> ['batch_size', 1, 'total_sequence_length']
+        attention_mask_shape.insert(1, 1) # [self.batch_size, 'total_sequence_length'] --> [self.batch_size, 1, 'total_sequence_length']
         self.make_unsqueeze(unsqueeze_3_name, unsqueeze_3_inputs, dtype=TensorProto.INT64, shape=attention_mask_shape)
         unsqueeze_4_name = f"{basename}/Unsqueeze_4"
         unsqueeze_4_inputs = [f"{unsqueeze_3_name}/output_0", "/model/constants/TensorProto.INT64/1D/2"]
-        attention_mask_shape.insert(1, 1) # ['batch_size', 1, 'total_sequence_length'] --> ['batch_size', 1, 1, 'total_sequence_length']
+        attention_mask_shape.insert(1, 1) # [self.batch_size, 1, 'total_sequence_length'] --> [self.batch_size, 1, 1, 'total_sequence_length']
         self.make_unsqueeze(unsqueeze_4_name, unsqueeze_4_inputs, dtype=TensorProto.INT64, shape=attention_mask_shape)
 
         # Make the main subgraph
@@ -2401,12 +2404,12 @@ class Model:
         # Left path
         reduce_sum_name = f"{attn_mask_basename}/ReduceSum"
         reduce_sum_inputs = ["attention_mask", "/model/constants/TensorProto.INT64/1D/1"]
-        self.make_reduce_sum(reduce_sum_name, reduce_sum_inputs, dtype=TensorProto.INT64, shape=["batch_size", 1])
+        self.make_reduce_sum(reduce_sum_name, reduce_sum_inputs, dtype=TensorProto.INT64, shape=[self.batch_size, 1])
         sub_name = f"{attn_mask_basename}/Sub"
         sub_inputs = [f"{reduce_sum_name}/output_0", "/model/constants/TensorProto.INT64/1D/1"]
-        self.make_sub(sub_name, sub_inputs, dtype=TensorProto.INT64, shape=["batch_size", 1])
+        self.make_sub(sub_name, sub_inputs, dtype=TensorProto.INT64, shape=[self.batch_size, 1])
         cast_1_name = f"{attn_mask_basename}/Sub/Cast"
-        self.make_cast(cast_1_name, f"{sub_name}/output_0", dtype=TensorProto.INT32, shape=["batch_size", 1])
+        self.make_cast(cast_1_name, f"{sub_name}/output_0", dtype=TensorProto.INT32, shape=[self.batch_size, 1])
 
         # Right path
         shape_name = f"{attn_mask_basename}/Shape"
@@ -2441,9 +2444,9 @@ class Model:
         # Left path
         reduce_sum_name = f"{attn_mask_basename}/ReduceSum"
         reduce_sum_inputs = ["attention_mask", "/model/constants/TensorProto.INT64/1D/1"]
-        self.make_reduce_sum(reduce_sum_name, reduce_sum_inputs, dtype=TensorProto.INT64, shape=["batch_size", 1])
+        self.make_reduce_sum(reduce_sum_name, reduce_sum_inputs, dtype=TensorProto.INT64, shape=[self.batch_size, 1])
         cast_1_name = f"{attn_mask_basename}/ReduceSum/Cast"
-        self.make_cast(cast_1_name, f"{reduce_sum_name}/output_0", dtype=TensorProto.INT32, shape=["batch_size", 1])
+        self.make_cast(cast_1_name, f"{reduce_sum_name}/output_0", dtype=TensorProto.INT32, shape=[self.batch_size, 1])
 
         # Right path
         shape_name = f"{attn_mask_basename}/Shape"
@@ -2534,7 +2537,7 @@ class PhiModel(Model):
 
         residual_add_name = f"/model/layers.{layer_id}/residual_add/Add"
         residual_add_inputs = [self.layernorm_attrs['skip_input'], self.mlp_attrs["output_0"]]
-        self.make_add(residual_add_name, residual_add_inputs, dtype=self.io_dtype, shape=['batch_size', 'sequence_length', self.hidden_size])
+        self.make_add(residual_add_name, residual_add_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.hidden_size])
 
         self.layernorm_attrs["first_layernorm"] = False
         if layer_id == self.num_layers - 1:
@@ -2602,16 +2605,16 @@ class Gemma2Model(GemmaModel):
         # Add final logit softcapping (Div --> Tanh --> Mul)
         div_name = "/lm_head/Div"
         div_inputs = [f"{matmul_name}/output_0", f"/model/constants/{self.to_str_dtype[self.io_dtype]}/0D/{self.lm_head_attrs['scale']}"]
-        self.make_div(div_name, div_inputs, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.vocab_size])
+        self.make_div(div_name, div_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.vocab_size])
 
         tanh_name = "/lm_head/Tanh"
-        self.make_tanh(tanh_name, f"{div_name}/output_0", dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.vocab_size])
+        self.make_tanh(tanh_name, f"{div_name}/output_0", dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.vocab_size])
 
         mul_name = "/lm_head/Mul"
         mul_inputs = [f"{tanh_name}/output_0", f"/model/constants/{self.to_str_dtype[self.io_dtype]}/0D/{self.lm_head_attrs['scale']}"]
         mul_output = "logits"
         self.make_node('Mul', inputs=mul_inputs, outputs=[mul_output], name=mul_name)
-        self.make_value_info(mul_output, self.io_dtype, shape=['batch_size', 'sequence_length', self.vocab_size])
+        self.make_value_info(mul_output, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.vocab_size])
 
 
 class Phi3Mini4KModel(MistralModel):
@@ -2690,7 +2693,7 @@ class Phi3Mini128KModel(Phi3Mini4KModel):
         self.make_mul(mul_name, mul_inputs, dtype=TensorProto.INT64, shape=None)
         add_1_name = f"{basename}/Add_1"
         add_1_inputs = [f"{mul_name}/output_0", "position_ids"]
-        self.make_add(add_1_name, add_1_inputs, dtype=TensorProto.INT64, shape=["batch_size", "sequence_length"])
+        self.make_add(add_1_name, add_1_inputs, dtype=TensorProto.INT64, shape=[self.batch_size, self.sequence_length])
 
         return add_1_name
         
@@ -2887,42 +2890,42 @@ class Phi3Small8KModel(Model):
         # Left path
         slice_1_name = f"/model/layers.{layer_id}/mlp/gelu/Slice"
         slice_1_inputs = [f"{up_add_name}/output_0", "/model/constants/TensorProto.INT64/1D/0", f"/model/constants/TensorProto.INT64/1D/{np.iinfo(np.int64).max}", "/model/constants/TensorProto.INT64/1D/-1", "/model/constants/TensorProto.INT64/1D/2"]
-        self.make_slice(slice_1_name, slice_1_inputs, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_slice(slice_1_name, slice_1_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         cast_1_name = f"/model/layers.{layer_id}/mlp/gelu/Cast"
-        self.make_cast(cast_1_name, f"{slice_1_name}/output_0", dtype=TensorProto.FLOAT, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_cast(cast_1_name, f"{slice_1_name}/output_0", dtype=TensorProto.FLOAT, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         isinf_1_name = f"/model/layers.{layer_id}/mlp/gelu/IsInf"
-        self.make_isinf(isinf_1_name, f"{cast_1_name}/output_0", shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_isinf(isinf_1_name, f"{cast_1_name}/output_0", shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         clip_1_name = f"/model/layers.{layer_id}/mlp/gelu/Clip"
         clip_1_inputs = [f"{slice_1_name}/output_0", "", f"/model/constants/{self.to_str_dtype[self.io_dtype]}/0D/{self.clamp_limit}"]
-        self.make_clip(clip_1_name, clip_1_inputs, self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_clip(clip_1_name, clip_1_inputs, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         where_1_name = f"/model/layers.{layer_id}/mlp/gelu/Where"
         where_1_inputs = [f"{isinf_1_name}/output_0", f"{slice_1_name}/output_0", f"{clip_1_name}/output_0"]
-        self.make_where(where_1_name, where_1_inputs, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_where(where_1_name, where_1_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         # Make activation
         act_fn_name = self.make_activation(layer_id, root_input=f"{where_1_name}/output_0")
 
         # Right path
         slice_2_name = f"/model/layers.{layer_id}/mlp/linear/Slice"
         slice_2_inputs = [f"{up_add_name}/output_0", "/model/constants/TensorProto.INT64/1D/1", f"/model/constants/TensorProto.INT64/1D/{np.iinfo(np.int64).max}", "/model/constants/TensorProto.INT64/1D/-1", "/model/constants/TensorProto.INT64/1D/2"]
-        self.make_slice(slice_2_name, slice_2_inputs, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_slice(slice_2_name, slice_2_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         cast_2_name = f"/model/layers.{layer_id}/mlp/linear/Cast"
-        self.make_cast(cast_2_name, f"{slice_2_name}/output_0", dtype=TensorProto.FLOAT, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_cast(cast_2_name, f"{slice_2_name}/output_0", dtype=TensorProto.FLOAT, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         isinf_2_name = f"/model/layers.{layer_id}/mlp/linear/IsInf"
-        self.make_isinf(isinf_2_name, f"{cast_2_name}/output_0", shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_isinf(isinf_2_name, f"{cast_2_name}/output_0", shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         clip_2_name = f"/model/layers.{layer_id}/mlp/linear/Clip"
         clip_2_inputs = [f"{slice_2_name}/output_0", f"/model/constants/{self.to_str_dtype[self.io_dtype]}/0D/-{self.clamp_limit}", f"/model/constants/{self.to_str_dtype[self.io_dtype]}/0D/{self.clamp_limit}"]
-        self.make_clip(clip_2_name, clip_2_inputs, self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_clip(clip_2_name, clip_2_inputs, self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         where_2_name = f"/model/layers.{layer_id}/mlp/linear/Where"
         where_2_inputs = [f"{isinf_2_name}/output_0", f"{slice_2_name}/output_0", f"{clip_2_name}/output_0"]
-        self.make_where(where_2_name, where_2_inputs, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_where(where_2_name, where_2_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
         add_name = f"/model/layers.{layer_id}/mlp/linear/Add"
         add_inputs = [f"{where_2_name}/output_0", f"/model/constants/{self.to_str_dtype[self.io_dtype]}/0D/1"]
-        self.make_add(add_name, add_inputs, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_add(add_name, add_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
 
         # Make Mul node after activation
         mul_name = f"/model/layers.{layer_id}/mlp/Mul"
         mul_inputs = [f"{act_fn_name}/output_0", f"{add_name}/output_0"]
-        self.make_mul(mul_name, mul_inputs, dtype=self.io_dtype, shape=["batch_size", "sequence_length", self.intermediate_size])
+        self.make_mul(mul_name, mul_inputs, dtype=self.io_dtype, shape=[self.batch_size, self.sequence_length, self.intermediate_size])
 
         # Make output MatMul and Add nodes
         down_matmul_name = f"/model/layers.{layer_id}/mlp/down_proj/MatMul"
